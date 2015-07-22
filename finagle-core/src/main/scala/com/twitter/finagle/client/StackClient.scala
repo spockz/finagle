@@ -3,7 +3,7 @@ package com.twitter.finagle.client
 import com.twitter.finagle._
 import com.twitter.finagle.factory.{
   BindingFactory, RefcountedFactory, StatsFactoryWrapper, TimeoutFactory}
-import com.twitter.finagle.filter.{DtabStatsFilter, ExceptionSourceFilter, MonitorFilter}
+import com.twitter.finagle.filter.{FailureDetectionFilter, DtabStatsFilter, ExceptionSourceFilter, MonitorFilter}
 import com.twitter.finagle.loadbalancer.LoadBalancerFactory
 import com.twitter.finagle.param._
 import com.twitter.finagle.service._
@@ -54,6 +54,7 @@ object StackClient {
     stk.push(Role.prepConn, identity[ServiceFactory[Req, Rep]](_))
     stk.push(WireTracingFilter.module)
     stk.push(ExpiringService.module)
+    stk.push(FailureDetectionFilter.module)
     stk.push(FailFastFactory.module)
     stk.push(DefaultPool.module)
     stk.push(TimeoutFilter.clientModule)
