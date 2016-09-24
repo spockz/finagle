@@ -2,30 +2,31 @@ package com.twitter.finagle.netty3
 
 import com.twitter.finagle.client.{LatencyCompensation, Transporter}
 import com.twitter.finagle.httpproxy.HttpConnectHandler
-import com.twitter.finagle.netty3.channel.{
-  ChannelRequestStatsHandler, ChannelStatsHandler, IdleChannelHandler}
+import com.twitter.finagle.netty3.channel.{ChannelRequestStatsHandler, ChannelStatsHandler, IdleChannelHandler}
 import com.twitter.finagle.netty3.socks.SocksConnectHandler
 import com.twitter.finagle.netty3.ssl.SslConnectHandler
 import com.twitter.finagle.netty3.transport.ChannelTransport
 import com.twitter.finagle.netty3.Netty3Transporter.{ChannelFactory, TransportFactory}
 import com.twitter.finagle.param.{Label, Logger}
 import com.twitter.finagle.socks.{Unauthenticated, UsernamePassAuthenticationSetting}
-import com.twitter.finagle.ssl.{SessionVerifier, Engine}
+import com.twitter.finagle.ssl.{Engine, SessionVerifier}
 import com.twitter.finagle.stats.StatsReceiver
 import com.twitter.finagle.transport.Transport
 import com.twitter.finagle.util.DefaultTimer
-import com.twitter.finagle.{Stack, WriteException, CancelledConnectionException}
-import com.twitter.util.{Future, Promise, NonFatal, Stopwatch}
+import com.twitter.finagle.{CancelledConnectionException, Stack, WriteException}
+import com.twitter.util.{Future, NonFatal, Promise, Stopwatch}
 import java.net.{InetSocketAddress, SocketAddress}
 import java.nio.channels.UnresolvedAddressException
 import java.util.IdentityHashMap
 import java.util.concurrent.TimeUnit
 import java.util.logging.Level
+import com.twitter.finagle.netty3.proxy.HttpProxyConnectHandler
 import org.jboss.netty.channel.ChannelHandler
 import org.jboss.netty.channel.socket.ChannelRunnableWrapper
-import org.jboss.netty.channel.socket.nio.{NioSocketChannel, NioClientSocketChannelFactory}
+import org.jboss.netty.channel.socket.nio.{NioClientSocketChannelFactory, NioSocketChannel}
 import org.jboss.netty.channel.{ChannelFactory => NettyChannelFactory, _}
 import org.jboss.netty.handler.timeout.IdleStateHandler
+
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 
@@ -365,7 +366,13 @@ class Netty3Transporter[In, Out](
     params: Stack.Params,
     addr: SocketAddress
   ): Unit = {
+    val Transporter.HttpProxyTo(httpProxyToHostAndCredentials) = params[Transporter.HttpProxyTo]
     val Transporter.HttpProxy(httpProxy, httpProxyCredentials) = params[Transporter.HttpProxy]
+
+    httpProxyToHostAndCredentials.foreach {
+      case (host, credentials) =>
+        pipeline.addFirst("httpProxyTo", new HttpProxyConnectHandler(host, credentials))
+    }
 
     (httpProxy, addr) match {
       case (Some(proxyAddr), inetAddr: InetSocketAddress) if !inetAddr.isUnresolved =>
