@@ -6,6 +6,7 @@ import com.twitter.util.{Return, Throw, Try}
 import java.nio.charset.StandardCharsets.{US_ASCII, UTF_8}
 import java.util.Base64
 import scala.collection.mutable.ArrayBuffer
+import scala.collection.compat.immutable.ArraySeq
 import scala.util.control.NonFatal
 
 /**
@@ -91,19 +92,20 @@ object HttpDtab {
    * @return a Seq[(String, String)] containing the dtab header entries found.
    */
   private[finagle] def strip(msg: Message): Seq[(String, String)] = {
-    var headerArr: ArrayBuffer[(String, String)] = null
     val nameValueIt = msg.headerMap.nameValueIterator
-    while (nameValueIt.hasNext) {
-      val nameValue = nameValueIt.next()
-      if (isDtabHeader(nameValue)) {
-        if (headerArr == null)
-          headerArr = new ArrayBuffer[(String, String)]()
-        headerArr += ((nameValue.name, nameValue.value))
-        msg.headerMap -= nameValue.name
+    if(!nameValueIt.hasNext) Nil
+    else {
+      val headerArr = ArraySeq.newBuilder[(String, String)]
+      while (nameValueIt.hasNext) {
+        val nameValue = nameValueIt.next()
+        if (isDtabHeader(nameValue)) {
+          headerArr += ((nameValue.name, nameValue.value))
+          msg.headerMap -= nameValue.name
+        }
       }
+      headerArr.result()
     }
-    if (headerArr == null) Nil
-    else headerArr
+    
   }
 
   /**

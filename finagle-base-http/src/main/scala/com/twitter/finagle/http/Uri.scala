@@ -45,7 +45,7 @@ final class Uri private (host: Option[String], path: String, query: Option[Strin
       case Some(q) => QueryParamDecoder.decodeParams(q)
       case None => Collections.emptyMap[String, JList[String]]
     }
-    val map: Map[String, Seq[String]] = decoded.asScala.toMap.mapValues(_.asScala)
+    val map: Map[String, Seq[String]] = decoded.asScala.toMap.transform{ case (_, v) => v.asScala.toSeq }
     new MapParamMap(map)
   }
 }

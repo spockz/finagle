@@ -3,7 +3,7 @@ package com.twitter.finagle.http
 import org.scalacheck.Gen
 import org.scalatestplus.scalacheck.ScalaCheckDrivenPropertyChecks
 
-class DefaultHeaderMapTest extends AbstractHeaderMapTest with ScalaCheckDrivenPropertyChecks {
+class TrieHeaderMapTest extends AbstractHeaderMapTest with ScalaCheckDrivenPropertyChecks {
 
   import Rfc7230HeaderValidationTest._
 
@@ -55,7 +55,7 @@ class DefaultHeaderMapTest extends AbstractHeaderMapTest with ScalaCheckDrivenPr
   test("validates header names & values with obs-folds (success)") {
     forAll(genFoldedValue) { v =>
       val value = DefaultHeaderMap("foo" -> v).apply("foo")
-      assert(value == DefaultHeaderMap.ObsFoldRegex.replaceAllIn(v, " "))
+      assert(value == HeaderMap.ObsFoldRegex.replaceAllIn(v, " "))
       assert(v.contains("\n"))
       assert(!value.contains("\n"))
     }

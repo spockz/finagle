@@ -12,26 +12,16 @@ import scala.collection.JavaConverters._
  *
  * Use `getAll()` to get all values for a key.
  */
-abstract class ParamMap
-    extends immutable.Map[String, String]
-    with immutable.MapLike[String, String, ParamMap] {
+abstract class ParamMapBase
+    extends immutable.Map[String, String]{ self: ParamMap =>
 
-  /**
-   * Add a key/value pair to the map, returning a new map.
-   * Overwrites all values if the key exists.
-   */
-  def +[B >: String](kv: (String, B)): ParamMap = {
-    val (key, value) = (kv._1, kv._2.toString)
+  def addParam(name: String, value: String): ParamMap = {
     val map = MapParamMap.tuplesToMultiMap(iterator.toSeq)
-    val mapWithKey = map.updated(key, Seq(value))
+    val mapWithKey = map.updated(name, Seq(value))
     new MapParamMap(mapWithKey, isValid)
   }
 
-  /**
-   * Removes a key from this map, returning a new map.
-   * All values for the key are removed.
-   */
-  def -(name: String): ParamMap = {
+  def removeParam(name: String): ParamMap = {
     val map = MapParamMap.tuplesToMultiMap(iterator.toSeq)
     new MapParamMap(map - name, isValid)
   }
@@ -141,27 +131,19 @@ object MapParamMap {
     new MapParamMap(MapParamMap.tuplesToMultiMap(params))
 
   def apply(map: Map[String, String]): MapParamMap =
-    new MapParamMap(map.mapValues { value =>
+    new MapParamMap(map.transform { case (_, value) =>
       Seq(value)
     })
 
   private[http] def tuplesToMultiMap(tuples: Seq[(String, String)]): Map[String, Seq[String]] = {
     tuples
       .groupBy { case (k, v) => k }
-      .mapValues { values =>
-        values.map { _._2 }
+      .transform { case (_, values) =>
+        values.map(_._2).toSeq
       }
   }
 }
 
-/** Empty ParamMap */
-object EmptyParamMap extends ParamMap {
-  val isValid = true
-  def get(name: String): Option[String] = None
-  def getAll(name: String): Iterable[String] = Nil
-  def iterator: Iterator[(String, String)] = Iterator.empty
-  override def -(name: String): ParamMap = this
-}
 
 /**
  * Http [[Request]]-backed [[ParamMap]]. This [[ParamMap]] contains both
@@ -252,7 +234,7 @@ class RequestParamMap(val request: Request) extends ParamMap {
     }.toIterator
 }
 
-object ParamMap {
+abstract class ParamMapCompanionBase {
 
   /** Create ParamMap from parameter list. */
   def apply(params: (String, String)*): ParamMap =
@@ -264,16 +246,16 @@ object ParamMap {
 
   private[http] val EmptyJMap = new java.util.HashMap[String, JList[String]]
 
-  private val ToShort = { s: String =>
+  private[http] val ToShort = { s: String =>
     StringUtil.toSomeShort(s)
   }
-  private val ToInt = { s: String =>
+  private[http] val ToInt = { s: String =>
     StringUtil.toSomeInt(s)
   }
-  private val ToLong = { s: String =>
+  private[http] val ToLong = { s: String =>
     StringUtil.toSomeLong(s)
   }
-  private val ToBoolean = { s: String =>
+  private[http] val ToBoolean = { s: String =>
     StringUtil.toBoolean(s)
   }
 }

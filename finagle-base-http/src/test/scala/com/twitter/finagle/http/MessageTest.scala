@@ -33,6 +33,7 @@ class MessageTest extends FunSuite {
 
   test("headers") {
     val response = Request()
+    
     response.allow.toList == Nil
     response.allow = Method.Get :: Method.Head :: Nil
     assert(response.allow == Some("GET,HEAD"))
@@ -48,6 +49,7 @@ class MessageTest extends FunSuite {
     assert(response.date == None)
     response.date = new Date(0L)
     assert(response.date == Some("Thu, 01 Jan 1970 00:00:00 GMT"))
+
   }
 
   test("charset") {
@@ -378,4 +380,5 @@ class MessageTest extends FunSuite {
       Message.httpDateFormat(timeEurope.toInstant.toEpochMilli) == "Sat, 30 Jun 2012 11:30:40 GMT"
     )
   }
+
 }

@@ -49,6 +49,7 @@ class TraceInfoTest extends FunSuite {
       )
     )
   }
+  
 
   // Particularly headers like parent ID need to be removed when a request is processed twice
   test("setClientRequestHeaders clears old headers when no trace") {
@@ -111,4 +112,5 @@ class TraceInfoTest extends FunSuite {
     assert(
       req.headerMap.keys == Set("X-B3-SpanId", "X-B3-Sampled", "X-B3-ParentSpanId", "X-B3-TraceId"))
   }
+  
 }

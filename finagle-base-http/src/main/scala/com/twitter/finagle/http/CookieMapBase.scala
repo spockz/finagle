@@ -5,9 +5,9 @@ import com.twitter.finagle.http.netty4.Netty4CookieCodec
 import scala.collection.mutable.ListBuffer
 import scala.collection.mutable
 
-private[finagle] object CookieMap {
+private[finagle] abstract class CookieMapCompanionBase {
 
-  private def cookieCodec = Netty4CookieCodec
+  private[finagle] def cookieCodec = Netty4CookieCodec
 
   // Note that this is a def to allow it to be toggled for unit tests.
   private[finagle] def includeSameSite: Boolean = supportSameSiteCodec()
@@ -22,9 +22,8 @@ private[finagle] object CookieMap {
  * cookie is removed from the CookieMap, a header is automatically removed from
  * the ''message''
  */
-class CookieMap private[finagle] (message: Message, cookieCodec: CookieCodec)
-    extends mutable.Map[String, Cookie]
-    with mutable.MapLike[String, Cookie, CookieMap] {
+abstract class CookieMapBase private[finagle] (message: Message, cookieCodec: CookieCodec)
+    extends mutable.Map[String, Cookie] { self: CookieMap =>
 
   def this(message: Message) =
     this(message, CookieMap.cookieCodec)
@@ -113,7 +112,7 @@ class CookieMap private[finagle] (message: Message, cookieCodec: CookieCodec)
    * and Cookie` itself) into this map. If there are already cookies
    * with the given `name` in the map, they will be removed.
    */
-  def +=(cookie: (String, Cookie)): this.type = {
+  protected def addCookie(cookie: (String, Cookie)): this.type = {
     val (n, c) = cookie
     setNoRewrite(n, c)
     rewriteCookieHeaders()
@@ -128,13 +127,13 @@ class CookieMap private[finagle] (message: Message, cookieCodec: CookieCodec)
     this += ((cookie.name, cookie))
   }
 
-  override def ++=(xs: TraversableOnce[(String, Cookie)]): this.type = {
+  protected def addCookies(xs: TraversableOnce[(String, Cookie)]): this.type = {
     xs.foreach { case (n, c) => setNoRewrite(n, c) }
     rewriteCookieHeaders()
     this
   }
 
-  override def --=(xs: TraversableOnce[String]): this.type = {
+  protected def removeCookies(xs: TraversableOnce[String]): this.type = {
     xs.foreach { n =>
       underlying -= n
     }
@@ -145,7 +144,7 @@ class CookieMap private[finagle] (message: Message, cookieCodec: CookieCodec)
   /**
    * Deletes all cookies with the given `name` from this map.
    */
-  def -=(name: String): this.type = {
+  def removeCookie(name: String): this.type = {
     underlying -= name
     rewriteCookieHeaders()
     this
