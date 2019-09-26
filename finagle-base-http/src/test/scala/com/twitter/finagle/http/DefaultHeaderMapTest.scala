@@ -16,12 +16,12 @@ class TrieHeaderMapTest extends AbstractHeaderMapTest with ScalaCheckDrivenPrope
   final def newHeaderMap(headers: (String, String)*): HeaderMap = DefaultHeaderMap(headers: _*)
 
   test("apply()") {
-    assert(DefaultHeaderMap().isEmpty)
+    assert(newHeaderMap().isEmpty)
   }
 
   test("reject out-of-bound characters in name") {
     forAll(Gen.choose[Char](128, Char.MaxValue)) { c =>
-      val headerMap = DefaultHeaderMap()
+      val headerMap = newHeaderMap()
       intercept[IllegalArgumentException] {
         headerMap.set(c.toString, "valid")
       }
@@ -34,7 +34,7 @@ class TrieHeaderMapTest extends AbstractHeaderMapTest with ScalaCheckDrivenPrope
 
   test("reject out-of-bound characters in value") {
     forAll(Gen.choose[Char](256, Char.MaxValue)) { c =>
-      val headerMap = DefaultHeaderMap()
+      val headerMap = newHeaderMap()
       intercept[IllegalArgumentException] {
         headerMap.set("valid", c.toString)
       }
@@ -48,13 +48,13 @@ class TrieHeaderMapTest extends AbstractHeaderMapTest with ScalaCheckDrivenPrope
   test("validates header names & values (success)") {
     forAll(genValidHeader) {
       case (k, v) =>
-        assert(DefaultHeaderMap(k -> v).get(k).contains(v))
+        assert(newHeaderMap(k -> v).get(k).contains(v))
     }
   }
 
   test("validates header names & values with obs-folds (success)") {
     forAll(genFoldedValue) { v =>
-      val value = DefaultHeaderMap("foo" -> v).apply("foo")
+      val value = newHeaderMap("foo" -> v).apply("foo")
       assert(value == HeaderMap.ObsFoldRegex.replaceAllIn(v, " "))
       assert(v.contains("\n"))
       assert(!value.contains("\n"))
@@ -63,24 +63,24 @@ class TrieHeaderMapTest extends AbstractHeaderMapTest with ScalaCheckDrivenPrope
 
   test("validates header names (failure)") {
     forAll(genInvalidHeaderName) { k =>
-      val e = intercept[IllegalArgumentException](DefaultHeaderMap(k -> "foo"))
+      val e = intercept[IllegalArgumentException](newHeaderMap(k -> "foo"))
       assert(e.getMessage.contains("prohibited character"))
     }
 
     forAll(genNonAsciiHeaderName) { k =>
-      val e = intercept[IllegalArgumentException](DefaultHeaderMap(k -> "foo"))
+      val e = intercept[IllegalArgumentException](newHeaderMap(k -> "foo"))
       assert(e.getMessage.contains("prohibited character"))
     }
   }
 
   test("validates header values (failure)") {
     forAll(genInvalidHeaderValue) { v =>
-      val e = intercept[IllegalArgumentException](DefaultHeaderMap("foo" -> v))
+      val e = intercept[IllegalArgumentException](newHeaderMap("foo" -> v))
       assert(e.getMessage.contains("prohibited character"))
     }
 
     forAll(genInvalidClrfHeaderValue) { v =>
-      intercept[IllegalArgumentException](DefaultHeaderMap("foo" -> v))
+      intercept[IllegalArgumentException](newHeaderMap("foo" -> v))
     }
   }
 
@@ -111,22 +111,22 @@ class TrieHeaderMapTest extends AbstractHeaderMapTest with ScalaCheckDrivenPrope
   test("getOrNull acts as get().orNull") {
     forAll(genValidHeader) {
       case (k, v) =>
-        val h = DefaultHeaderMap(k -> v)
+        val h = newHeaderMap(k -> v)
         assert(h.getOrNull(k) == h.get(k).orNull)
     }
 
-    val empty = DefaultHeaderMap()
+    val empty = newHeaderMap()
     assert(empty.getOrNull("foo") == empty.get("foo").orNull)
   }
 
   // a handful of non-property based tests
   test("empty header name is rejected") {
-    intercept[IllegalArgumentException](DefaultHeaderMap("" -> "bar"))
+    intercept[IllegalArgumentException](newHeaderMap("" -> "bar"))
   }
 
   test("header names with separators are rejected") {
     ((0x1 to 0x20).map(_.toChar) ++ "\"(),/:;<=>?@[\\]{}").foreach { illegalChar =>
-      intercept[IllegalArgumentException](DefaultHeaderMap(illegalChar.toString -> "bar"))
+      intercept[IllegalArgumentException](newHeaderMap(illegalChar.toString -> "bar"))
     }
   }
 }

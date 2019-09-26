@@ -210,7 +210,7 @@ object HeaderMap {
    * @note the headers are added to this `HeaderMap` via an `add` operation.
    */
   def apply(headers: (String, String)*): HeaderMap = {
-    val result = new TrieHeaderMap()
+    val result = new MapBackedHeaderMap()
     headers.foreach(t => result.add(t._1, t._2))
     result
   }

@@ -10,10 +10,11 @@ import scala.annotation.tailrec
 import scala.collection.mutable
 
 /**
- * Mutable, thread-safe [[HeaderMap]] implementation, backed
- * by HeaderTrie, a mutable prefix trie.
+ * Mutable, thread-safe [[HeaderMap]] implementation, backed by
+ * a mutable [[Map[String, Header]]], where the map key
+ * is forced to lower case
  */
-private[http] abstract class TrieHeaderMapBase extends HeaderMap {
+private[http] abstract class MapBackedHeaderMapBase extends HeaderMap {
   //implementation methods should be final, but that 
   //creates a VerifyError: https://github.com/scala/bug/issues/11749
   import HeaderMap._
@@ -23,19 +24,18 @@ private[http] abstract class TrieHeaderMapBase extends HeaderMap {
   // As such, we synchronize on the underlying `Headers` when performing
   // accesses to avoid this. In the common case of no concurrent access,
   // this should be cheap.
-  private[this] val underlying: HeaderTrie = HeaderTrie.empty
-  final def prettyPrint = underlying.pretty(0)
+  private[this] val underlying: mutable.Map[String, Header] = mutable.Map.empty
   
-  //overridden for performance
-  final override def foreach[U](f: ((String, String)) => U): Unit =
-    underlying.foreach { case (k, v) => f((k, v)) }
+  //private[this] val underlying: List[Header] = Nil
+  final override def foreach[U](f: ((String, String)) => U): Unit = for {
+    (_, h) <- underlying
+    kv <- h.keyValuePairs
+  } f(kv)
 
   // ---- HeaderMap -----
 
   final def getAll(key: String): Seq[String] = underlying.synchronized {
-    var h = underlying.forNameOrNull(key)
-    if (h == null) Nil
-    else h.values
+    underlying.get(key.toLowerCase).toSeq.flatMap(h => h.values)
   }
 
   // Validates key and value.
@@ -46,7 +46,12 @@ private[http] abstract class TrieHeaderMapBase extends HeaderMap {
 
   // Does not validate key and value.
   final def addUnsafe(key: String, value: String): HeaderMap = underlying.synchronized {
-    underlying.addHeader(new Header(key, value))
+    val lower = key.toLowerCase
+    val header = new Header(key, value)
+    underlying.get(lower) match {
+      case Some(h) => h.add(header)
+      case None => underlying.+=((lower, header))
+    }
     this
   }
 
@@ -58,36 +63,29 @@ private[http] abstract class TrieHeaderMapBase extends HeaderMap {
 
   // Does not validate key and value.
   final def setUnsafe(key: String, value: String): HeaderMap = underlying.synchronized {
-    underlying.setHeader(new Header(key, value))
+    underlying.+=((key.toLowerCase, new Header(key, value)))
     this
-  }
-
-  // Overriding this for efficiency reasons.
-  final override def getOrNull(key: String): String = {
-    val h = underlying.forNameOrNull(key)
-    if (h == null) null
-    else h.value
   }
 
   // ---- Map/MapLike -----
 
   /*final*/ def get(key: String): Option[String] = underlying.synchronized {
-    Option(getOrNull(key))
+    underlying.get(key.toLowerCase).map(_.value)
   }
 
   final def iterator: Iterator[(String, String)] = underlying.synchronized {
-    underlying.leaves.flatMap(leaf => if (leaf == null) Iterator.empty else leaf.keyValuePairs)
+    underlying.iterator.flatMap{ case (_, h) => h.keyValuePairs }
   }
 
   final def removed(key: String) = underlying.synchronized {
-    underlying.clearName(key)
+    underlying.-=(key.toLowerCase)
     this
   }
 
   /*final*/ override def keys: Set[String] = keysIterator.toSet
 
   final override def keysIterator: Iterator[String] = underlying.synchronized {
-    underlying.leaves.flatMap(header => {
+    underlying.valuesIterator.flatMap(header => {
       def rec(uniq: List[String], todo: List[String]): List[String] = todo match {
         case Nil => uniq
         case (head :: tail) =>
@@ -99,10 +97,6 @@ private[http] abstract class TrieHeaderMapBase extends HeaderMap {
 
   private[finagle] final override def nameValueIterator: Iterator[HeaderMap.NameValue] =
     underlying.synchronized {
-      underlying.leaves.flatMap(_.iterated)
+      underlying.valuesIterator.flatMap(_.iterated)
     }
-}
-
-object DefaultHeaderMap {
-  def apply(args: (String, String)*) = HeaderMap(args :_*)
 }

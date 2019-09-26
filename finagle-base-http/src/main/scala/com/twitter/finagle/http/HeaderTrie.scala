@@ -1,50 +1,16 @@
 package com.twitter.finagle.http
 
 import scala.annotation.tailrec
-import scala.collection.mutable
-import scala.collection.AbstractIterator
 import HeaderMap.Header
 
-//ad-hoc zipper. Linear search. Justified by low number of collisions. Three is going to be a stretch.
-//alternatives to possibly try out:
-//* specializations for cases 1, 2 and 3
-//** fall back to Vector and binary search for bigger.
-//** fall back to plain unordered List for bigger, and iterate fully (but cheap insert)
-//** fall back to plain sorted List (linear search that can stop once bigger, but expensive insert)
-final private[http] case class Children(smaller: List[Headers], focus: Headers, larger: List[Headers]) {
-  def unsafedown = Children(smaller.tail, smaller.head, focus :: larger)
-  def unsafeup = Children(focus :: smaller, larger.head, larger.tail)
-  /**
-   * returns the closest branch to start
-   */
-  def findBranch(start: Int): Children = {
-    if (start < focus.path.head) findBranchDown(start)
-    else findBranchUp(start)
-  }
+/**
+ * Prefix trie for headers, where headers are stored on a lower-case prefix of
+ * their name. This trie is used as the backing store of TrieHeaderMap
+ */
+final class HeaderTrie private(var header: Header, var path: List[Int], private var children: HeaderTrie.Children) {
+  import HeaderTrie._
 
-  @tailrec
-  private def findBranchDown(start: Int): Children = {
-    if (start < focus.path.head && smaller.nonEmpty)
-      Children(smaller.tail, smaller.head, focus :: larger).findBranchDown(start)
-    else this
-  }
-
-  @tailrec
-  private def findBranchUp(start: Int): Children = {
-    if (start > focus.path.head && larger.nonEmpty)
-      Children(focus :: smaller, larger.head, larger.tail).findBranchUp(start)
-    else this
-  }
-  def iterator: Iterator[Headers] = smaller.iterator ++ Iterator(focus) ++ larger.iterator
-}
-
-object Headers {
-  def empty: Headers = new Headers(null, Nil, null)
-}
-
-final class Headers(var header: Header, var path: List[Int], var children: Children) {
-
-  def foreach[U](f: ((String, String)) => U): Unit = {
+  def foreach[U](f: (String, String) => U): Unit = {
     var cur = header
     while(cur != null){
       f(cur.name, cur.value)
@@ -67,30 +33,16 @@ final class Headers(var header: Header, var path: List[Int], var children: Child
     }
   }
 
-  private def hashChar(c: Char): Int =
-    if (c >= 'A' && c <= 'Z') c + 32
-    else c
-
-  def stripCommonPrefix[A](l: List[A], r: List[A]): (List[A], List[A], List[A]) = {
-    val prefixBuilder = List.newBuilder[A]
-    def rec(ll: List[A], rr: List[A]): (List[A], List[A], List[A]) = {
-      (ll, rr) match {
-        case (hl :: tl, hr :: tr) if (hl == hr) => {
-          prefixBuilder += hl
-          rec(tl, tr)
-        }
-        case _ => (ll, rr, prefixBuilder.result)
-      }
-    }
-    rec(l, r)
-  }
-
-  def forNameOrNull(name: String, index: Int): Header = {
+  @tailrec
+  private def forNameOrNull(name: String, index: Int): Header = {
     if(name.length == index) header
     else if (children == null) null
     else {
       val head = hashChar(name(index))
       val child = children.findBranch(head).focus
+
+      /* loop manually unrolled so that outer can be @tailrec
+       * the loop is easier to understand as the below method
       @tailrec
       def rec(nextIndex: Int, branch: List[Int]): Header = {
         if(branch.isEmpty) child.forNameOrNull(name, nextIndex)
@@ -99,9 +51,20 @@ final class Headers(var header: Header, var path: List[Int], var children: Child
         else null
       }
       rec(index, child.path)
+      */
+      var nextIndex = index
+      var branch = child.path
+
+      while(branch.nonEmpty && name.length < nextIndex && branch.head == hashChar(name(nextIndex))) {
+        nextIndex += 1
+        branch = branch.tail
+      }
+
+      if(branch.isEmpty) child.forNameOrNull(name, nextIndex)
+      else null
+      
     }
   }
-
 
   def leaves: Iterator[Header] = {
     def flatChildren = children.iterator.flatMap(_.leaves)
@@ -110,8 +73,6 @@ final class Headers(var header: Header, var path: List[Int], var children: Child
     else if (children == null) Iterator.single(header)
     else flatChildren ++ Iterator.single(header)
   }
-
-  def pathFor(name: String): List[Int] = name.map(hashChar).toList
 
   def forNameOrNull(name: String): Header = forNameOrNull(name, 0)
 
@@ -130,39 +91,8 @@ final class Headers(var header: Header, var path: List[Int], var children: Child
     this
   }
 
-  def stripCommonIndex(name: String, start: Int, path: List[Int]): (Int, List[Int], List[Int]) = {
-    if (start >= name.length || path.isEmpty || path.head != hashChar(name(start))) (start, path, Nil)
-    else {
-      //consider the so-nice-we-traverse-it-twice strategy, where we
-      //only append to the builder if we don't fully exhaust the path
-      //in which case we can return it unchanged.
-      val pb = List.newBuilder[Int]
-      @tailrec
-      def rec(i: Int, remainder: List[Int]): (Int, List[Int], List[Int]) = {
-        if(remainder.isEmpty) (i, remainder, path)
-        else if (i >= name.length || remainder.head != hashChar(name(i)))
-          (i, remainder, pb.result())
-        else {
-          pb += remainder.head
-          rec(i + 1, remainder.tail)
-        }
-      }
-      pb += path.head
-      rec(start + 1, path.tail)
-    }
-  }
-
-  def pathEndFor(name: String, first: Int): List[Int] = {
-    @tailrec
-    def rec(agg: List[Int], i: Int): List[Int] = {
-      if(i < first) agg
-      else rec(hashChar(name(i)) :: agg, i - 1)
-    }
-    rec(Nil, name.length - 1)
-  }
-
   @tailrec
-  def updateHeader(index: Int, name: String, newHeader: Header, overwrite: Boolean): Unit = {
+  private def updateHeader(index: Int, name: String, newHeader: Header, overwrite: Boolean): Unit = {
     if(index == name.length) {
       val replacement = if (header == null || overwrite) newHeader
                         else { header.add(newHeader); header }
@@ -170,7 +100,7 @@ final class Headers(var header: Header, var path: List[Int], var children: Child
       ()
     }
     else {
-      def mkChild = new Headers(newHeader, pathEndFor(name, index), null)
+      def mkChild = new HeaderTrie(newHeader, pathEndFor(name, index), null)
       if(children == null) {
         children = Children(Nil, mkChild, Nil)
         ()
@@ -200,23 +130,23 @@ final class Headers(var header: Header, var path: List[Int], var children: Child
           //that has no header, that has two children of its own, the old one with
           //the shared prefix truncated, and a new one with the added header and its diverging path
           val (afterLastCommonIndex, remainingPath, commonPrefixTail) = stripCommonIndex(name, index + 1, focus.path.tail)
-          if (remainingPath.isEmpty){
+          if (remainingPath.isEmpty) {
             focus.updateHeader(afterLastCommonIndex, name, newHeader, overwrite)
           }
           else if(afterLastCommonIndex == name.length) {
-            val grandchild = new Headers(focus.header, remainingPath, focus.children)
-            val newChild = new Headers(newHeader, focus.path.head :: commonPrefixTail, Children(Nil, grandchild, Nil))
+            val grandchild = new HeaderTrie(focus.header, remainingPath, focus.children)
+            val newChild = new HeaderTrie(newHeader, focus.path.head :: commonPrefixTail, Children(Nil, grandchild, Nil))
             children = Children(focussed.smaller, newChild, focussed.larger)
             ()
           }
           else {
-            val oldGrandChild = new Headers(focus.header, remainingPath, focus.children)
+            val oldGrandChild = new HeaderTrie(focus.header, remainingPath, focus.children)
             val pathEnd = pathEndFor(name, afterLastCommonIndex)
-            val newGrandChild = new Headers(newHeader, pathEnd, null)
+            val newGrandChild = new HeaderTrie(newHeader, pathEnd, null)
             val grandChildren = if (remainingPath.head < pathEnd.head)
                                    Children(List(oldGrandChild), newGrandChild, Nil)
                                 else Children(Nil, newGrandChild, List(oldGrandChild))
-            val focusChild = new Headers(null, focus.path.head :: commonPrefixTail, grandChildren)
+            val focusChild = new HeaderTrie(null, focus.path.head :: commonPrefixTail, grandChildren)
             children = Children(focussed.smaller, focusChild, focussed.larger)
             ()
           }
@@ -225,13 +155,12 @@ final class Headers(var header: Header, var path: List[Int], var children: Child
     }
   }
 
-  def showPath(path: List[Int]) = path.map(_.toChar).mkString
-
   def clearName(name: String): this.type = {
     clearPath(pathFor(name))
     this
   }
-
+  
+  //todo: refactor into index-based for performance
   private def clearPath(path: List[Int]): this.type = path match {
     case Nil => {
       //leaf found
@@ -283,4 +212,93 @@ final class Headers(var header: Header, var path: List[Int], var children: Child
       }
     }
   }
+}
+
+object HeaderTrie {
+  //ad-hoc zipper. Linear search. Justified by low number of collisions. Three is going to be a stretch.
+  //alternatives to possibly try out:
+  //* specializations for cases 1, 2 and 3
+  //** fall back to Vector and binary search for bigger.
+  //** fall back to plain unordered List for bigger, and iterate fully (but cheap insert)
+  //** fall back to plain sorted List (linear search that can stop once bigger, but expensive insert)
+  final private case class Children(smaller: List[HeaderTrie], focus: HeaderTrie, larger: List[HeaderTrie]) {
+    def unsafedown = Children(smaller.tail, smaller.head, focus :: larger)
+    def unsafeup = Children(focus :: smaller, larger.head, larger.tail)
+    /**
+     * returns the closest branch to start
+     */
+    def findBranch(start: Int): Children = {
+      if (start < focus.path.head) findBranchDown(start)
+      else findBranchUp(start)
+    }
+
+    @tailrec
+    private def findBranchDown(start: Int): Children = {
+      if (start < focus.path.head && smaller.nonEmpty)
+        Children(smaller.tail, smaller.head, focus :: larger).findBranchDown(start)
+      else this
+    }
+
+    @tailrec
+    private def findBranchUp(start: Int): Children = {
+      if (start > focus.path.head && larger.nonEmpty)
+        Children(focus :: smaller, larger.head, larger.tail).findBranchUp(start)
+      else this
+    }
+    
+    def iterator: Iterator[HeaderTrie] = smaller.iterator ++ Iterator(focus) ++ larger.iterator
+  }
+
+  def empty: HeaderTrie = new HeaderTrie(null, Nil, null)
+  
+  private def hashChar(c: Char): Int =
+    if (c >= 'A' && c <= 'Z') c + 32
+    else c
+
+  private def pathEndFor(name: String, first: Int): List[Int] = {
+    @tailrec
+    def rec(agg: List[Int], i: Int): List[Int] = {
+      if(i < first) agg
+      else rec(hashChar(name(i)) :: agg, i - 1)
+    }
+    rec(Nil, name.length - 1)
+  }
+
+  private def pathFor(name: String): List[Int] = name.map(hashChar).toList
+
+  private def showPath(path: List[Int]): String = path.map(_.toChar).mkString
+
+  private def stripCommonPrefix[A](l: List[A], r: List[A]): (List[A], List[A], List[A]) = {
+    val prefixBuilder = List.newBuilder[A]
+    def rec(ll: List[A], rr: List[A]): (List[A], List[A], List[A]) = {
+      (ll, rr) match {
+        case (hl :: tl, hr :: tr) if (hl == hr) => {
+          prefixBuilder += hl
+          rec(tl, tr)
+        }
+        case _ => (ll, rr, prefixBuilder.result)
+      }
+    }
+    rec(l, r)
+  }
+
+  private def stripCommonIndex(name: String, start: Int, path: List[Int]): (Int, List[Int], List[Int]) = {
+    if (start >= name.length || path.isEmpty || path.head != hashChar(name(start))) (start, path, Nil)
+    else {
+      val pb = List.newBuilder[Int]
+      @tailrec
+      def rec(i: Int, remainder: List[Int]): (Int, List[Int], List[Int]) = {
+        if(remainder.isEmpty) (i, remainder, path)
+        else if (i >= name.length || remainder.head != hashChar(name(i)))
+          (i, remainder, pb.result())
+        else {
+          pb += remainder.head
+          rec(i + 1, remainder.tail)
+        }
+      }
+      pb += path.head
+      rec(start + 1, path.tail)
+    }
+  }
+
 }

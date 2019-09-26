@@ -47,9 +47,9 @@ abstract class AbstractHeaderMapTest extends FunSuite {
   test("contains") {
     val map = newHeaderMap("Cookie" -> "1")
 
-    assert(map.contains("Cookie") == true)
-    assert(map.contains("COOKIE") == true)
-    assert(map.contains("missing") == false)
+    assert(map.contains("Cookie"))
+    assert(map.contains("COOKIE"))
+    assert(!map.contains("missing"))
   }
 
   test("set") {
